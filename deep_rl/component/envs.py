@@ -11,6 +11,8 @@ import torch
 from gym.spaces.box import Box
 from gym.spaces.discrete import Discrete
 
+from envs.fourrooms import FourRooms
+
 from baselines.common.atari_wrappers import make_atari, wrap_deepmind
 from baselines.common.atari_wrappers import FrameStack as FrameStack_
 from baselines.common.vec_env.subproc_vec_env import SubprocVecEnv, VecEnv
@@ -24,13 +26,15 @@ except ImportError:
 
 
 # adapted from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr/blob/master/envs.py
-def make_env(env_id, seed, rank, episode_life=True):
+def make_env(env_id, seed, goal_location, blocked_hallway, rank, episode_life=True):
     def _thunk():
         random_seed(seed)
         if env_id.startswith("dm"):
             import dm_control2gym
             _, domain, task = env_id.split('-')
             env = dm_control2gym.make(domain_name=domain, task_name=task)
+        elif env_id == "FourRooms-v1":
+            env = FourRooms(goal_location)
         else:
             env = gym.make(env_id)
         is_atari = hasattr(gym.envs, 'atari') and isinstance(
@@ -38,7 +42,10 @@ def make_env(env_id, seed, rank, episode_life=True):
         if is_atari:
             env = make_atari(env_id)
         env.seed(seed + rank)
-        env = OriginalReturnWrapper(env)
+        if env_id == "FourRooms-v1":
+            env = ToyTextReturnWrapperFourRooms(env)
+        else:
+            env = OriginalReturnWrapper(env)
         if is_atari:
             env = wrap_deepmind(env,
                                 episode_life=episode_life,
@@ -53,6 +60,37 @@ def make_env(env_id, seed, rank, episode_life=True):
         return env
 
     return _thunk
+    
+
+class ToyTextReturnWrapperFourRooms(gym.Wrapper):
+    def __init__(self, env):
+        gym.Wrapper.__init__(self, env)
+        self.total_rewards = 0
+        #self.n_steps = 0
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        #self.n_steps+=1
+        #print(np.sum(obs))
+        self.total_rewards += reward
+        #print(obs, action)
+        #plt.imshow(self.env.render(show_goal=False), cmap='Blues')
+        #plt.axis('off')
+        #plt.show(block=False)
+        #plt.pause(0.1)
+        #plt.close()
+        if done:
+            #self.env.render()   
+            info['episodic_return'] = self.total_rewards
+            self.total_rewards = 0
+            #print("Number of steps in episode = ", self.n_steps)
+            #self.n_steps = 0
+        else:
+            info['episodic_return'] = None
+        return obs, reward, done, info
+
+    def reset(self):
+        return self.env.reset()
 
 
 class OriginalReturnWrapper(gym.Wrapper):
@@ -153,16 +191,16 @@ class DummyVecEnv(VecEnv):
 class Task:
     def __init__(self,
                  name,
+                 seed,
+                 goal_location=None,
+                 blocked_hallway=None,
                  num_envs=1,
                  single_process=True,
                  log_dir=None,
-                 episode_life=True,
-                 seed=None):
-        if seed is None:
-            seed = np.random.randint(int(1e9))
+                 episode_life=True):
         if log_dir is not None:
             mkdir(log_dir)
-        envs = [make_env(name, seed, i, episode_life) for i in range(num_envs)]
+        envs = [make_env(name, seed, goal_location, blocked_hallway, i, episode_life) for i in range(num_envs)]
         if single_process:
             Wrapper = DummyVecEnv
         else:

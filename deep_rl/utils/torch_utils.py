@@ -7,6 +7,7 @@
 from .config import *
 import torch
 import os
+import random
 
 
 def select_device(gpu_id):
@@ -34,8 +35,14 @@ def to_np(t):
 
 
 def random_seed(seed=None):
+    random.seed(seed)
     np.random.seed(seed)
-    torch.manual_seed(np.random.randint(int(1e6)))
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    #np.random.seed(seed)
+    #torch.manual_seed(np.random.randint(int(1e6)))
 
 
 def set_one_thread():

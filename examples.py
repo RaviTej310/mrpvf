@@ -5,7 +5,9 @@
 #######################################################################
 
 from deep_rl import *
+import numpy as np
 
+from arguments import get_args
 
 # DQN
 def dqn_feature(**kwargs):
@@ -14,25 +16,25 @@ def dqn_feature(**kwargs):
     config = Config()
     config.merge(kwargs)
 
-    config.task_fn = lambda: Task(config.game)
-    config.eval_env = config.task_fn()
+    config.task_fn = lambda: Task(config.game, seed = config.seed, goal_location = config.goal_location)
+    config.eval_env = Task(config.game, seed = config.seed, goal_location = config.goal_location)
 
-    config.optimizer_fn = lambda params: torch.optim.RMSprop(params, 0.001)
+    config.optimizer_fn = lambda params: torch.optim.RMSprop(params, 0.01)
     config.network_fn = lambda: VanillaNet(config.action_dim, FCBody(config.state_dim))
     # config.network_fn = lambda: DuelingNet(config.action_dim, FCBody(config.state_dim))
-    # config.replay_fn = lambda: Replay(memory_size=int(1e4), batch_size=10)
-    config.replay_fn = lambda: AsyncReplay(memory_size=int(1e4), batch_size=10)
+    config.replay_fn = lambda: Replay(memory_size=int(1e4), batch_size=10)
+    #config.replay_fn = lambda: AsyncReplay(memory_size=int(1e5), batch_size=30)
 
-    config.random_action_prob = LinearSchedule(1.0, 0.1, 1e4)
+    config.random_action_prob = LinearSchedule(1.0, 0.1, 1e6)
     config.discount = 0.99
     config.target_network_update_freq = 200
-    config.exploration_steps = 1000
+    config.exploration_steps = 10000
     # config.double_q = True
     config.double_q = False
     config.sgd_update_frequency = 4
     config.gradient_clip = 5
     config.eval_interval = int(5e3)
-    config.max_steps = 1e5
+    config.max_steps = config.max_steps
     config.async_actor = False
     run_steps(DQNAgent(config))
 
@@ -483,15 +485,65 @@ def td3_continuous(**kwargs):
 
 
 if __name__ == '__main__':
+    args = get_args()
+    print(args.transfer, args.seed)
     mkdir('log')
     mkdir('tf_log')
     set_one_thread()
-    random_seed()
+    seed = args.seed
+    random_seed(seed=seed) 
     select_device(-1)
     # select_device(0)
 
-    game = 'CartPole-v0'
-    # dqn_feature(game=game)
+    num_runs = 15   # DON'T CHANGE THIS - NEED TO KEEP THIS SAME TO ENSURE REPRODUCIBILITY. IF THIS IS CHANGED, DIFFERENT GOALS WILL BE CHOSEN
+    goal_locations = np.random.randint(104,size=(2,num_runs))
+    blocked_hallways = np.random.randint(4,size=(num_runs))
+
+    iteration = args.run_index-1
+    original_goal_location = goal_locations[0][iteration]
+    transfer_goal_location = goal_locations[1][iteration] 
+
+    algo = args.algo
+    game = "FourRooms-v1"
+    goal_location = original_goal_location
+    new_goal_location = transfer_goal_location
+    num_eigvals = args.num_eigvals
+    transfer = args.transfer
+    stochastic = args.stochastic
+    if algo == 'mrpvf':
+        decomp_type = args.decomp_type
+    elif algo == 'pvf':
+        decomp_type = ""
+
+    if stochastic == False:
+        tag = "_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
+    
+        if transfer == False:   
+            max_steps = 1500000
+            dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps)
+
+        elif transfer == True:
+            max_steps = 800000
+            load_weights_location = "log/"+algo+"_"+decomp_type+"_n="+str(num_eigvals)+"/"+"_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"__ntimesteps=1200000.pt"
+            print(load_weights_location)
+            tag = "_transfer_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
+            dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = new_goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps, load_weights_location = load_weights_location)
+
+    elif stochastic == True:
+        tag = "_stochastic_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
+    
+        if transfer == False:   
+            max_steps = 2000000
+            dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps)
+
+        elif transfer == True:
+            max_steps = 800000
+            load_weights_location = "log/stochastic_"+algo+"_"+decomp_type+"_n="+str(num_eigvals)+"/"+"_stochastic_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"__ntimesteps=1200000.pt"
+            print(load_weights_location)
+            tag = "_stochastic_transfer_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
+            dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = new_goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps, load_weights_location = load_weights_location)
+
+
     # quantile_regression_dqn_feature(game=game)
     # categorical_dqn_feature(game=game)
     # a2c_feature(game=game)
@@ -500,13 +552,13 @@ if __name__ == '__main__':
     # ppo_feature(game=game)
 
     # game = 'HalfCheetah-v2'
-    game = 'Hopper-v2'
+    # game = 'Hopper-v2'
     # a2c_continuous(game=game)
     # ppo_continuous(game=game)
     # ddpg_continuous(game=game)
-    td3_continuous(game=game)
+    # td3_continuous(game=game)
 
-    game = 'BreakoutNoFrameskip-v4'
+    # game = 'BreakoutNoFrameskip-v4'
     # dqn_pixel(game=game)
     # quantile_regression_dqn_pixel(game=game)
     # categorical_dqn_pixel(game=game)
