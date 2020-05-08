@@ -49,21 +49,34 @@ class DQNActor(BaseActor):
         #print(q)
 
         config = self.config
-        
-        if self._total_steps < config.exploration_steps \
-                or np.random.rand() < config.random_action_prob():
-            action = np.random.randint(0, 4)
-        else:
-            state_indices = np.argmax(self._state)
-            states = self.v[:,state_indices,:]
-            q_values = (torch.matmul(torch.from_numpy(states).float(),self.linear_weights)).t()
-            action = torch.argmax(q_values)
-        next_state, reward, done, info = self._task.step([action])
-        entry = [self._state[0], action, reward[0], next_state[0], int(done[0]), info]
-        self._total_steps += 1
-        self._state = next_state
-        return entry
 
+        if config.control == True:
+            if self._total_steps < config.exploration_steps \
+                    or np.random.rand() < config.random_action_prob():
+                action = np.random.randint(0, 4)
+            else:
+                state_indices = np.argmax(self._state)
+                states = self.v[:,state_indices,:]
+                q_values = (torch.matmul(torch.from_numpy(states).float(),self.linear_weights)).t()
+                action = torch.argmax(q_values)
+            next_state, reward, done, info = self._task.step([action])
+            entry = [self._state[0], action, reward[0], next_state[0], int(done[0]), info]
+            self._total_steps += 1
+            self._state = next_state
+            return entry
+
+        elif config.control == False:
+            state_indices = np.argmax(self._state)
+            if np.random.rand() < config.random_action_prob():
+                action = np.random.randint(0, 4)
+            else:
+                action = config.fixed_policy[config.obs_map == state_indices]
+            action = int(action)
+            next_state, reward, done, info = self._task.step([action])
+            entry = [self._state[0], action, reward[0], next_state[0], int(done[0]), info]
+            self._total_steps += 1
+            self._state = next_state
+            return entry
 
 class DQNAgent(BaseAgent):
     def __init__(self, config):
@@ -236,7 +249,10 @@ class DQNAgent(BaseAgent):
             next_states = self.v[:,next_state_indices,:]
             q_next = (torch.matmul(torch.from_numpy(next_states).float(),self.target_linear_weights)).t()
 
-            q_next = q_next.max(1)[0]   
+            if config.control == True:
+                q_next = q_next.max(1)[0]  
+            elif config.control == False:
+                q_next = q_next[torch.arange(q_next.shape[0]), actions]
             terminals = tensor(terminals)
             rewards = tensor(rewards)
             q_next = self.config.discount * q_next * (1 - terminals)
@@ -245,6 +261,13 @@ class DQNAgent(BaseAgent):
 
             state_indices = np.argmax(np.array(states), axis=1)
             states = self.v[:,state_indices,:]
+            #print(states[0,0,:][np.nonzero(states[0,0,:] != 0.)])
+            #print(self.v.shape)
+            #print(self.v[0,:,0])
+            #print(np.std(self.v[0,:,72]))
+            #print(np.std(self.v[1,:,73]))
+            #print(np.std(self.v[2,:,74]))
+            #print(np.std(self.v[3,:,75]))
             q = (torch.matmul(torch.from_numpy(states).float(),self.linear_weights)).t()
 
             #if self.total_steps % 50000 == 0:
@@ -252,6 +275,10 @@ class DQNAgent(BaseAgent):
 
             q = q[self.batch_indices, actions]
             loss = (q_next - q).pow(2).mul(0.5).mean()
+            
+            if config.control == False:
+                print(loss)
+            
             self.optimizer.zero_grad()
             loss.backward()
             #nn.utils.clip_grad_norm_(self.network.parameters(), self.config.gradient_clip)
@@ -298,43 +325,82 @@ class DQNAgent(BaseAgent):
                 if done == True:
                     next_state_array = np.zeros(len(next_state))
                     next_state_array[self.config.goal_location] = 1 
-                if np.argmax(state_array) == np.argmax(next_state_array):
-                    self.adj_graph[action, np.argmax(state_array),np.argmax(next_state_array)] = 2
-                    if config.decomp_type == 'eig':
-                        self.adj_graph[action, np.argmax(next_state_array),np.argmax(state_array)] = 2
+
+                if config.decomp_type == 'full_eig':
+                    reverse_actions = {0:1, 1:0, 2:3, 3:2}
+                    for permissible_action in range(4):
+                        if action == permissible_action:
+                            self.adj_graph[permissible_action, np.argmax(state_array),np.argmax(next_state_array)] = max(1000, self.adj_graph[permissible_action, np.argmax(state_array),np.argmax(next_state_array)])
+                            if done == True:
+                                self.adj_graph[reverse_actions[permissible_action], np.argmax(next_state_array), np.argmax(state_array)] = max(1000, self.adj_graph[reverse_actions[permissible_action], np.argmax(next_state_array), np.argmax(state_array)])
+                        else:
+                            self.adj_graph[permissible_action, np.argmax(state_array),np.argmax(next_state_array)] = max(1, self.adj_graph[permissible_action, np.argmax(state_array),np.argmax(next_state_array)])
+                            if done == True:
+                                self.adj_graph[reverse_actions[permissible_action], np.argmax(next_state_array), np.argmax(state_array)] = max(1, self.adj_graph[reverse_actions[permissible_action], np.argmax(next_state_array), np.argmax(state_array)])
+
                 else:
-                    self.adj_graph[action, np.argmax(state_array),np.argmax(next_state_array)] = 1
-                    if config.decomp_type == 'eig':
-                        self.adj_graph[action, np.argmax(next_state_array),np.argmax(state_array)] = 1
+                    if np.argmax(state_array) == np.argmax(next_state_array):
+                        self.adj_graph[action, np.argmax(state_array),np.argmax(next_state_array)] = 2
+                        if config.decomp_type == 'eig':
+                            self.adj_graph[action, np.argmax(next_state_array),np.argmax(state_array)] = 2
+                    else:
+                        self.adj_graph[action, np.argmax(state_array),np.argmax(next_state_array)] = 1
+                        if config.decomp_type == 'eig':
+                            self.adj_graph[action, np.argmax(next_state_array),np.argmax(state_array)] = 1
             
-            self.deg_graph = np.zeros((4, 104, 104))
-            self.laplacian = np.zeros((4, 104, 104))
-            temp_v = np.zeros((4,104,self.num_eigvals*4))
-            for action_index in range(4):
-                self.deg_graph[action_index] = np.diag(np.sum(self.adj_graph[action_index], axis=1))
-                self.laplacian[action_index] = self.deg_graph[action_index] - self.adj_graph[action_index]
-                if config.decomp_type == 'eig':
-                    self.w, self.v = (eigh(self.laplacian[action_index], eigvals = (0, self.num_eigvals-1)))
-                elif config.decomp_type == 'svd':
-                    diag = np.array(np.diagonal(self.adj_graph[action_index]))
-                    new_diag = np.array(np.diagonal(self.laplacian[action_index]))
-                    new_diag[diag>0] += 1
-                    np.fill_diagonal(self.laplacian[action_index],new_diag)
-                    u,s,v = svd(self.laplacian[action_index])
-                    self.w = s[-config.num_eigvals:]
-                    self.v = u[:,-config.num_eigvals:]
-                self.v = np.array(self.v)
-                self.v = np.repeat(self.v, 4, axis=1)
-                temp_v[action_index] = self.v
+            if self.total_steps > 9000:
+                self.deg_graph = np.zeros((4, 104, 104))
+                self.laplacian = np.zeros((4, 104, 104))
+                temp_v = np.zeros((4,104,self.num_eigvals*4))
+                for action_index in range(4):
+                    if config.decomp_type == 'full_eig':
+                        # find the P matrix
+                        self.deg_graph[action_index] = np.diag(np.sum(self.adj_graph[action_index], axis=1))
+                        self.P = np.linalg.solve(self.deg_graph[action_index], self.adj_graph[action_index])
+                        # get the Perron vector w
+                        self.old_psi_diag = np.random.rand(104)
+                        self.old_psi_diag = self.old_psi_diag/np.sum(self.old_psi_diag)
+                        self.psi_diag = np.random.rand(104)
+                        self.psi_diag = self.psi_diag/np.sum(self.psi_diag)
+                        while abs(np.sum(self.old_psi_diag - self.psi_diag))>0.001:
+                            self.old_psi_diag = self.psi_diag
+                            self.psi_diag = np.dot(self.psi_diag, self.P)
+                        # find the laplacian
+                        self.psi = np.diag(self.psi_diag)
+                        self.laplacian[action_index] = self.psi - (np.matmul(self.psi, self.P)+np.matmul((self.P).transpose(), self.psi))/2
+                        # verifying that directed laplacian is symmetric
+                        # print((self.laplacian[action_index].transpose() == self.laplacian[action_index]).all())
+                        # find the eigen vectors and values into self.w, self.v
+                        self.w, self.v = (eigh(self.laplacian[action_index], eigvals = (0, self.num_eigvals-1)))
+                        # repeat the self.v =, self.v = , and temp_v[action_index] lines here
+                        self.v = np.array(self.v)
+                        self.v = np.repeat(self.v, 4, axis=1)
+                        temp_v[action_index] = self.v                    
+                    else:
+                        self.deg_graph[action_index] = np.diag(np.sum(self.adj_graph[action_index], axis=1))
+                        self.laplacian[action_index] = self.deg_graph[action_index] - self.adj_graph[action_index]
+                        if config.decomp_type == 'eig':
+                            self.w, self.v = (eigh(self.laplacian[action_index], eigvals = (0, self.num_eigvals-1)))
+                        elif config.decomp_type == 'svd':
+                            diag = np.array(np.diagonal(self.adj_graph[action_index]))
+                            new_diag = np.array(np.diagonal(self.laplacian[action_index]))
+                            new_diag[diag>0] += 1
+                            np.fill_diagonal(self.laplacian[action_index],new_diag)
+                            u,s,v = svd(self.laplacian[action_index])
+                            self.w = s[-config.num_eigvals:]
+                            self.v = u[:,-config.num_eigvals:]
+                        self.v = np.array(self.v)
+                        self.v = np.repeat(self.v, 4, axis=1)
+                        temp_v[action_index] = self.v
 
-            self.v = temp_v
-            #print(self.laplacian)
-            for action in range(self.v.shape[0]):
-                for col in range(self.v.shape[2]):
-                    if col%4 != action:
-                        self.v[action,:,col] = 0
+                self.v = temp_v
+                #print(self.laplacian)
+                for action in range(self.v.shape[0]):
+                    for col in range(self.v.shape[2]):
+                        if col%4 != action:
+                            self.v[action,:,col] = 0
 
-            self.actor.v = self.v
+                self.actor.v = self.v
 
         if self.total_steps / self.config.sgd_update_frequency % \
                 self.config.target_network_update_freq == 0:

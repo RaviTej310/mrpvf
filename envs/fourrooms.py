@@ -97,7 +97,7 @@ wwwwwwwwwwwww
 
 		if not self.occupancy[next_cell]:
 
-			if self.rng.uniform() < 1/20: #1/50:
+			if self.rng.uniform() < 0: #1/20: #1/50:
 				available_cells = self.check_available_cells(self.current_cell)
 				while len(available_cells)<4:
 					available_cells.append(self.current_cell)

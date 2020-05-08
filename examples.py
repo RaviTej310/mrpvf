@@ -16,6 +16,35 @@ def dqn_feature(**kwargs):
     config = Config()
     config.merge(kwargs)
 
+    if config.control == False:
+        config.fixed_policy = np.array([np.ones(13)*-1,
+        [-1,0,2,2,2,2,-1,1,1,1,1,1,-1],
+        [-1,0,0,0,0,0,-1,1,1,1,1,1,-1],
+        [-1,0,0,0,0,0, 2,2,2,2,2,2,-1],
+        [-1,0,0,0,0,0,-1,0,0,0,0,0,-1],
+        [-1,0,0,0,0,0,-1,0,0,0,0,0,-1],
+        [-1,-1,0,-1,-1,-1,-1,0,0,0,0,0,-1],
+        [-1,3,0,2,2,2,-1,-1,-1,0,-1,-1,-1],
+        [-1,0,0,0,0,0,-1, 1, 3,0, 2, 2,-1],
+        [-1,0,0,0,0,0,-1, 1, 3,0, 2, 2,-1],
+        [-1,0,0,0,0,0, 2, 2, 2,2, 2, 2,-1],
+        [-1,0,0,0,0,0,-1, 0, 0,0, 0, 0,-1],
+        np.ones(13)*-1])
+
+        config.obs_map = np.array([np.ones(13)*-1,
+        [-1,0,1,2,3,4,-1,5,6,7,8,9,-1],
+        [-1,10,11,12,13,14,-1,15,16,17,18,19,-1],
+        [-1,20,21,22,23,24,25,26,27,28,29,30,-1],
+        [-1,31,32,33,34,35,-1,36,37,38,39,40,-1],
+        [-1,41,42,43,44,45,-1,46,47,48,49,50,-1],
+        [-1,-1,51,-1,-1,-1,-1,52,53,54,55,56,-1],
+        [-1,57,58,59,60,61,-1,-1,-1,62,-1,-1,-1],
+        [-1,63,64,65,66,67,-1,68,69,70,71,72,-1],
+        [-1,73,74,75,76,77,-1,78,79,80,81,82,-1],
+        [-1,83,84,85,86,87,88,89,90,91,92,93,-1],
+        [-1,94,95,96,97,98,-1,99,100,101,102,103,-1],
+        np.ones(13)*-1])
+
     config.task_fn = lambda: Task(config.game, seed = config.seed, goal_location = config.goal_location)
     config.eval_env = Task(config.game, seed = config.seed, goal_location = config.goal_location)
 
@@ -25,7 +54,12 @@ def dqn_feature(**kwargs):
     config.replay_fn = lambda: Replay(memory_size=int(1e4), batch_size=10)
     #config.replay_fn = lambda: AsyncReplay(memory_size=int(1e5), batch_size=30)
 
-    config.random_action_prob = LinearSchedule(1.0, 0.1, 1e6)
+    if config.control == True:
+        config.random_action_prob = LinearSchedule(1.0, 0.1, 1e6)
+        config.max_steps = config.max_steps
+    elif config.control == False:
+        config.random_action_prob = LinearSchedule(0.1, 0.1, 1e6)
+        config.max_steps = 200000
     config.discount = 0.99
     config.target_network_update_freq = 200
     config.exploration_steps = 10000
@@ -34,7 +68,6 @@ def dqn_feature(**kwargs):
     config.sgd_update_frequency = 4
     config.gradient_clip = 5
     config.eval_interval = int(5e3)
-    config.max_steps = config.max_steps
     config.async_actor = False
     run_steps(DQNAgent(config))
 
@@ -343,57 +376,6 @@ def option_critic_pixel(**kwargs):
 
 
 # PPO
-def ppo_feature(**kwargs):
-    generate_tag(kwargs)
-    kwargs.setdefault('log_level', 0)
-    config = Config()
-    config.merge(kwargs)
-
-    config.num_workers = 5
-    config.task_fn = lambda: Task(config.game, num_envs=config.num_workers)
-    config.eval_env = Task(config.game)
-    config.optimizer_fn = lambda params: torch.optim.RMSprop(params, 0.001)
-    config.network_fn = lambda: CategoricalActorCriticNet(config.state_dim, config.action_dim, FCBody(config.state_dim))
-    config.discount = 0.99
-    config.use_gae = True
-    config.gae_tau = 0.95
-    config.entropy_weight = 0.01
-    config.gradient_clip = 5
-    config.rollout_length = 128
-    config.optimization_epochs = 10
-    config.mini_batch_size = 32 * 5
-    config.ppo_ratio_clip = 0.2
-    config.log_interval = 128 * 5 * 10
-    run_steps(PPOAgent(config))
-
-
-def ppo_pixel(**kwargs):
-    generate_tag(kwargs)
-    kwargs.setdefault('log_level', 0)
-    config = Config()
-    config.merge(kwargs)
-
-    config.task_fn = lambda: Task(config.game, num_envs=config.num_workers)
-    config.eval_env = Task(config.game)
-    config.num_workers = 8
-    config.optimizer_fn = lambda params: torch.optim.RMSprop(params, lr=0.00025, alpha=0.99, eps=1e-5)
-    config.network_fn = lambda: CategoricalActorCriticNet(config.state_dim, config.action_dim, NatureConvBody())
-    config.state_normalizer = ImageNormalizer()
-    config.reward_normalizer = SignNormalizer()
-    config.discount = 0.99
-    config.use_gae = True
-    config.gae_tau = 0.95
-    config.entropy_weight = 0.01
-    config.gradient_clip = 0.5
-    config.rollout_length = 128
-    config.optimization_epochs = 3
-    config.mini_batch_size = 32 * 8
-    config.ppo_ratio_clip = 0.1
-    config.log_interval = 128 * 8
-    config.max_steps = int(2e7)
-    run_steps(PPOAgent(config))
-
-
 def ppo_continuous(**kwargs):
     generate_tag(kwargs)
     kwargs.setdefault('log_level', 0)
@@ -406,7 +388,8 @@ def ppo_continuous(**kwargs):
     config.network_fn = lambda: GaussianActorCriticNet(
         config.state_dim, config.action_dim, actor_body=FCBody(config.state_dim, gate=torch.tanh),
         critic_body=FCBody(config.state_dim, gate=torch.tanh))
-    config.optimizer_fn = lambda params: torch.optim.Adam(params, 3e-4, eps=1e-5)
+    config.actor_opt_fn = lambda params: torch.optim.Adam(params, 3e-4)
+    config.critic_opt_fn = lambda params: torch.optim.Adam(params, 1e-3)
     config.discount = 0.99
     config.use_gae = True
     config.gae_tau = 0.95
@@ -416,7 +399,8 @@ def ppo_continuous(**kwargs):
     config.mini_batch_size = 64
     config.ppo_ratio_clip = 0.2
     config.log_interval = 2048
-    config.max_steps = 1e6
+    config.max_steps = 3e6
+    config.target_kl = 0.01
     config.state_normalizer = MeanStdNormalizer()
     run_steps(PPOAgent(config))
 
@@ -515,33 +499,43 @@ if __name__ == '__main__':
     elif algo == 'pvf':
         decomp_type = ""
 
-    if stochastic == False:
+    # for policy evaluation
+    if args.control == False:
+        goal_location = 0
         tag = "_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
-    
-        if transfer == False:   
-            max_steps = 1500000
-            dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps)
+        max_steps = 1500000
+        dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps, control = args.control)
 
-        elif transfer == True:
-            max_steps = 800000
-            load_weights_location = "log/"+algo+"_"+decomp_type+"_n="+str(num_eigvals)+"/"+"_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"__ntimesteps=1200000.pt"
-            print(load_weights_location)
-            tag = "_transfer_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
-            dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = new_goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps, load_weights_location = load_weights_location)
+    # for control
+    elif args.control == True:
+        if stochastic == False:
+            tag = "_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
+        
+            if transfer == False:   
+                max_steps = 1500000
+                dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps, control = args.control)
 
-    elif stochastic == True:
-        tag = "_stochastic_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
-    
-        if transfer == False:   
-            max_steps = 2000000
-            dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps)
+            elif transfer == True:
+                max_steps = 800000
+                #load_weights_location = "log/"+algo+"_"+decomp_type+"_n="+str(num_eigvals)+"/"+"_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"__ntimesteps=1200000.pt"
+                load_weights_location = "log/"+algo+"_"+decomp_type+"_n="+str(num_eigvals)+"_weight=2/"+"_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"__ntimesteps=1200000.pt"
+                print(load_weights_location)
+                tag = "_transfer_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
+                dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = new_goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps, load_weights_location = load_weights_location, control = args.control)
 
-        elif transfer == True:
-            max_steps = 800000
-            load_weights_location = "log/stochastic_"+algo+"_"+decomp_type+"_n="+str(num_eigvals)+"/"+"_stochastic_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"__ntimesteps=1200000.pt"
-            print(load_weights_location)
-            tag = "_stochastic_transfer_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
-            dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = new_goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps, load_weights_location = load_weights_location)
+        elif stochastic == True:
+            tag = "_stochastic_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
+        
+            if transfer == False:   
+                max_steps = 2000000
+                dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps, control = args.control)
+
+            elif transfer == True:
+                max_steps = 800000
+                load_weights_location = "log/stochastic_"+algo+"_"+decomp_type+"_n="+str(num_eigvals)+"/"+"_stochastic_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"__ntimesteps=1200000.pt"
+                print(load_weights_location)
+                tag = "_stochastic_transfer_"+game+"_"+algo+"_"+decomp_type+"_seed="+str(seed)+"_run_iteration="+str(iteration)+"_num_eigvals="+str(num_eigvals)+"_"
+                dqn_feature(game=game, decomp_type = decomp_type, seed = seed, goal_location = new_goal_location, tag = tag, algo = algo, num_eigvals = num_eigvals, transfer = transfer, max_steps = max_steps, load_weights_location = load_weights_location, control = args.control)
 
 
     # quantile_regression_dqn_feature(game=game)
@@ -549,9 +543,7 @@ if __name__ == '__main__':
     # a2c_feature(game=game)
     # n_step_dqn_feature(game=game)
     # option_critic_feature(game=game)
-    # ppo_feature(game=game)
 
-    # game = 'HalfCheetah-v2'
     # game = 'Hopper-v2'
     # a2c_continuous(game=game)
     # ppo_continuous(game=game)
@@ -565,4 +557,3 @@ if __name__ == '__main__':
     # a2c_pixel(game=game)
     # n_step_dqn_pixel(game=game)
     # option_critic_pixel(game=game)
-    # ppo_pixel(game=game)
